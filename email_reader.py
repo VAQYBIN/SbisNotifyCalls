@@ -151,9 +151,8 @@ class EmailReader:
 
                     # Приводим email_date к offset-aware, если нужно
                     if email_date.tzinfo is None:
-                        from datetime import timezone
-                        email_date = email_date.replace(
-                            tzinfo=timezone.utc)
+                        email_date = email_date.replace(tzinfo=timezone.utc)
+
                     # Проверяем, что письмо действительно новое
                     if email_date <= self.last_check_time:
                         continue
