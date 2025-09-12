@@ -1,3 +1,4 @@
+import re
 import asyncio
 import logging
 from datetime import datetime
@@ -85,25 +86,30 @@ class EmailBot:
 
             await message.reply(help_text, parse_mode='HTML')
 
+    def clean_email_body(self, body: str) -> str:
+        # Удалить CSS стили и HTML теги
+        body = re.sub(r'<style.*?>.*?</style>', '', body, flags=re.DOTALL)
+        body = re.sub(r'<[^>]+>', '', body)
+        # Оставить только строки с нужными данными
+        lines = body.splitlines()
+        filtered = []
+        for line in lines:
+            line = line.strip()
+            if line.startswith("Номер -") or line.startswith("ФИО -") or line.startswith("Время -"):
+                filtered.append(line)
+        return '\n'.join(filtered)
+
     async def format_email_message(self, email_info: dict) -> str:
         """Форматирование письма для отправки в группу"""
-
-        # Ограничиваем длину темы и текста
-        # subject = email_info['subject'][:100] + ('...' if len(email_info['subject']) > 100 else '')
-        body = email_info['body'][:2000] + ('...' if len(email_info['body']) > 2000 else '')
-
+        # Очищаем тело письма
+        body = self.clean_email_body(email_info['body'])[
+            :2000] + ('...' if len(email_info['body']) > 2000 else '')
         # Форматируем дату
         date_str = email_info['date'].strftime("%d.%m.%Y %H:%M")
-
         message_text = (
-            # f"📧 <b>Новое письмо</b>\n\n"
-            # f"👤 <b>От:</b> {email_info['from_name']}\n"
-            # f"📩 <b>Email:</b> <code>{email_info['from_email']}</code>\n"
-            # f"📝 <b>Тема:</b> {subject}\n"
             f"🕒 <b>Дата:</b> {date_str}\n\n"
             f"{body}"
         )
-
         return message_text
 
     async def send_to_groups(self, message_text: str):
@@ -124,23 +130,30 @@ class EmailBot:
                 # Попробуем отправить без форматирования
                 try:
                     # Убираем HTML разметку для fallback
-                    plain_text = message_text.replace('<b>', '').replace('</b>', '')
-                    plain_text = plain_text.replace('<code>', '').replace('</code>', '')
-                    plain_text = plain_text.replace('<pre>', '').replace('</pre>', '')
+                    plain_text = message_text.replace(
+                        '<b>', '').replace('</b>', '')
+                    plain_text = plain_text.replace(
+                        '<code>', '').replace('</code>', '')
+                    plain_text = plain_text.replace(
+                        '<pre>', '').replace('</pre>', '')
 
                     await self.bot.send_message(
                         chat_id=group_id,
-                        text=plain_text[:4096]  # Telegram ограничение на длину сообщения
+                        # Telegram ограничение на длину сообщения
+                        text=plain_text[:4096]
                     )
-                    logger.info(f"✅ Резервная отправка в группу {group_id} успешна")
+                    logger.info(
+                        f"✅ Резервная отправка в группу {group_id} успешна")
 
                 except Exception as e2:
-                    logger.error(f"❌ Критическая ошибка отправки в группу {group_id}: {e2}")
+                    logger.error(
+                        f"❌ Критическая ошибка отправки в группу {group_id}: {e2}")
 
     async def handle_new_email(self, email_info: dict):
         """Обработка нового письма"""
         try:
-            logger.info(f"🔔 Обрабатываем новое письмо: {email_info['subject']}")
+            logger.info(
+                f"🔔 Обрабатываем новое письмо: {email_info['subject']}")
 
             # Форматируем сообщение
             message_text = await self.format_email_message(email_info)
