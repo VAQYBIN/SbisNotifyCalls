@@ -1,6 +1,7 @@
 import re
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
@@ -10,15 +11,51 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import Config
 from email_reader import EmailReader
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log', encoding="utf-8"),
-        logging.StreamHandler()
-    ]
-)
+
+def setup_logging():
+    """Настройка системы логирования с учетом переменных окружения"""
+    # Получаем уровень логирования из конфига
+    log_level = getattr(logging, Config.LOG_LEVEL, logging.INFO)
+
+    # Создаем форматтер
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
+    # Создаем список обработчиков
+    handlers = []
+
+    # Файловый обработчик с ротацией
+    try:
+        file_handler = RotatingFileHandler(
+            Config.LOG_FILE,
+            maxBytes=Config.LOG_MAX_FILE_SIZE,
+            backupCount=Config.LOG_BACKUP_COUNT,
+            encoding='utf-8'
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(log_level)
+        handlers.append(file_handler)
+    except Exception as e:
+        print(f"⚠️  Ошибка создания файлового логгера: {e}")
+
+    # Консольный обработчик (если включен)
+    if Config.LOG_CONSOLE_OUTPUT:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        console_handler.setLevel(log_level)
+        handlers.append(console_handler)
+
+    # Базовая настройка логирования
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=handlers
+    )
+
+
+# Настраиваем логирование
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -53,7 +90,8 @@ class EmailBot:
                 "🔍 Я автоматически отслеживаю новые письма и пересылаю их содержимое в настроенные группы.\n\n"
                 "📊 Доступные команды:\n"
                 "• /status - текущий статус бота\n"
-                "• /help - справка"
+                "• /help - справка\n"
+                "• /config - текущие настройки"
             )
 
         @self.dp.message(Command("status"))
@@ -72,10 +110,39 @@ class EmailBot:
                 f"📧 Обработано писем: {self.emails_processed}\n"
                 f"📱 Групп для уведомлений: {len(Config.NOTIFIED_GROUPS)}\n"
                 f"✉️ Мониторинг почты: {Config.EMAIL_ACC}\n"
+                f"⏱️ Интервал проверки: {Config.CHECK_INTERVAL} сек\n"
                 f"🔄 Статус: Активен"
             )
 
+            if Config.FILTER_SENDER:
+                status_text += f"\n🔍 Фильтр отправителя: {Config.FILTER_SENDER}"
+
             await message.reply(status_text, parse_mode='HTML')
+
+        @self.dp.message(Command("config"))
+        async def config_command(message: Message):
+            """Команда /config - показать текущие настройки"""
+            # Проверяем, что это личное сообщение
+            if message.chat.type != 'private':
+                return
+
+            config_text = (
+                f"⚙️ <b>Текущие настройки</b>\n\n"
+                f"📧 <b>Email:</b> {Config.EMAIL_ACC}\n"
+                f"📱 <b>Групп:</b> {len(Config.NOTIFIED_GROUPS)}\n"
+                f"⏱️ <b>Интервал проверки:</b> {Config.CHECK_INTERVAL} сек\n\n"
+                f"📝 <b>Логирование:</b>\n"
+                f"• Уровень: {Config.LOG_LEVEL}\n"
+                f"• Файл: {Config.LOG_FILE}\n"
+                f"• Макс. размер: {Config.LOG_MAX_FILE_SIZE // 1024 // 1024} MB\n"
+                f"• Резервных копий: {Config.LOG_BACKUP_COUNT}\n"
+                f"• Вывод в консоль: {'Да' if Config.LOG_CONSOLE_OUTPUT else 'Нет'}"
+            )
+
+            if Config.FILTER_SENDER:
+                config_text += f"\n\n🔍 <b>Фильтр отправителя:</b> {Config.FILTER_SENDER}"
+
+            await message.reply(config_text, parse_mode='HTML')
 
         @self.dp.message(Command("help"))
         async def help_command(message: Message):
@@ -91,9 +158,11 @@ class EmailBot:
                 "📋 <b>Команды:</b>\n"
                 "• /start - запуск и приветствие\n"
                 "• /status - информация о статусе бота\n"
+                "• /config - текущие настройки\n"
                 "• /help - эта справка\n\n"
                 "⚙️ <b>Настройка:</b>\n"
-                "Бот настраивается через .env файл с переменными окружения.\n\n"
+                "Бот настраивается через .env файл с переменными окружения.\n"
+                "Все доступные переменные смотрите в .env.example\n\n"
                 "ℹ️ <b>Примечание:</b>\n"
                 "Команды работают только в личных сообщениях с ботом."
             )
@@ -231,16 +300,19 @@ class EmailBot:
         except Exception as e:
             logger.error(f"❌ Ошибка обработки письма: {e}")
 
-    async def start_monitoring(self, sender_email: str = None, check_interval: int = 30):
-        """Запуск мониторинга почты"""
+    async def start_monitoring(self):
+        """Запуск мониторинга почты с использованием настроек из конфига"""
         logger.info("🚀 Запуск мониторинга почты...")
+
+        if Config.FILTER_SENDER:
+            logger.info(f"🔍 Фильтрация по отправителю: {Config.FILTER_SENDER}")
 
         # Запускаем мониторинг в отдельной задаче
         monitoring_task = asyncio.create_task(
             self.email_reader.run_email_monitoring(
                 callback=self.handle_new_email,
-                sender_email=sender_email,
-                check_interval=check_interval
+                sender_email=Config.FILTER_SENDER,
+                check_interval=Config.CHECK_INTERVAL
             )
         )
 
@@ -256,7 +328,7 @@ class EmailBot:
             logger.info(f"✅ Бот @{bot_info.username} успешно запущен")
 
             # Запуск мониторинга почты
-            monitoring_task = await self.start_monitoring()  # Используем настройки из конфига
+            monitoring_task = await self.start_monitoring()
 
             # Запуск поллинга бота
             polling_task = asyncio.create_task(

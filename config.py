@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from typing import List
+from typing import List, Optional
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -21,6 +21,19 @@ class Config:
     IMAP_SERVER: str = 'imap.yandex.ru'
     IMAP_PORT: int = 993
 
+    # Настройки логирования
+    LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO').upper()
+    LOG_FILE: str = os.getenv('LOG_FILE', 'bot.log')
+    LOG_MAX_FILE_SIZE: int = int(
+        os.getenv('LOG_MAX_FILE_SIZE', '10485760'))  # 10MB
+    LOG_BACKUP_COUNT: int = int(os.getenv('LOG_BACKUP_COUNT', '5'))
+    LOG_CONSOLE_OUTPUT: bool = os.getenv(
+        'LOG_CONSOLE_OUTPUT', 'true').lower() in ('true', '1', 'yes', 'on')
+
+    # Настройки мониторинга
+    CHECK_INTERVAL: int = int(os.getenv('CHECK_INTERVAL', '30'))
+    FILTER_SENDER: Optional[str] = os.getenv('FILTER_SENDER', None)
+
     # Проверка обязательных переменных
     @classmethod
     def validate(cls):
@@ -37,9 +50,27 @@ class Config:
         cls.NOTIFIED_GROUPS = [group.strip()
                                for group in cls.NOTIFIED_GROUPS if group.strip()]
 
+        # Проверка уровня логирования
+        valid_log_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        if cls.LOG_LEVEL not in valid_log_levels:
+            print(
+                f"⚠️  Неверный LOG_LEVEL: {cls.LOG_LEVEL}, используется INFO")
+            cls.LOG_LEVEL = 'INFO'
+
+        # Проверка интервала мониторинга
+        if cls.CHECK_INTERVAL < 10:
+            print(
+                f"⚠️  Слишком маленький CHECK_INTERVAL: {cls.CHECK_INTERVAL}, используется 10 секунд")
+            cls.CHECK_INTERVAL = 10
+
         print("✅ Конфигурация загружена:")
         print(f"📧 Email: {cls.EMAIL_ACC}")
         print(f"📱 Групп для уведомлений: {len(cls.NOTIFIED_GROUPS)}")
+        print(f"📝 Уровень логирования: {cls.LOG_LEVEL}")
+        print(f"📁 Файл логов: {cls.LOG_FILE}")
+        print(f"⏱️  Интервал проверки: {cls.CHECK_INTERVAL} сек")
+        if cls.FILTER_SENDER:
+            print(f"🔍 Фильтр отправителя: {cls.FILTER_SENDER}")
 
 
 # Проверяем конфигурацию при импорте модуля
