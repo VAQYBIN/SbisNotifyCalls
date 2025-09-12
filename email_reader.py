@@ -5,7 +5,7 @@ from email.header import decode_header
 from email.utils import parseaddr
 from typing import List, Dict, Optional
 import ssl
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from config import Config
 import logging
 
@@ -16,7 +16,8 @@ class EmailReader:
     def __init__(self):
         self.imap = None
         # Начальная проверка за последную минуту
-        self.last_check_time = datetime.now() - timedelta(minutes=1)
+        self.last_check_time = datetime.now(
+            timezone.utc) - timedelta(minutes=1)
 
     async def connect(self) -> bool:
         """Подключение к IMAP серверу Yandex"""
@@ -148,6 +149,11 @@ class EmailReader:
                     date_str = msg.get('Date')
                     email_date = email.utils.parsedate_to_datetime(date_str)
 
+                    # Приводим email_date к offset-aware, если нужно
+                    if email_date.tzinfo is None:
+                        from datetime import timezone
+                        email_date = email_date.replace(
+                            tzinfo=timezone.utc)
                     # Проверяем, что письмо действительно новое
                     if email_date <= self.last_check_time:
                         continue
@@ -179,7 +185,7 @@ class EmailReader:
                     continue
 
             # Обновляем время последней проверки
-            self.last_check_time = datetime.now()
+            self.last_check_time = datetime.now(timezone.utc)
 
             return new_emails
 

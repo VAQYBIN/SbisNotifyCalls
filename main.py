@@ -89,19 +89,19 @@ class EmailBot:
         """Форматирование письма для отправки в группу"""
 
         # Ограничиваем длину темы и текста
-        subject = email_info['subject'][:100] + ('...' if len(email_info['subject']) > 100 else '')
+        # subject = email_info['subject'][:100] + ('...' if len(email_info['subject']) > 100 else '')
         body = email_info['body'][:2000] + ('...' if len(email_info['body']) > 2000 else '')
 
         # Форматируем дату
         date_str = email_info['date'].strftime("%d.%m.%Y %H:%M")
 
         message_text = (
-            f"📧 <b>Новое письмо</b>\n\n"
-            f"👤 <b>От:</b> {email_info['from_name']}\n"
-            f"📩 <b>Email:</b> <code>{email_info['from_email']}</code>\n"
-            f"📝 <b>Тема:</b> {subject}\n"
+            # f"📧 <b>Новое письмо</b>\n\n"
+            # f"👤 <b>От:</b> {email_info['from_name']}\n"
+            # f"📩 <b>Email:</b> <code>{email_info['from_email']}</code>\n"
+            # f"📝 <b>Тема:</b> {subject}\n"
             f"🕒 <b>Дата:</b> {date_str}\n\n"
-            f"💬 <b>Содержимое:</b>\n<pre>{body}</pre>"
+            f"{body}"
         )
 
         return message_text
