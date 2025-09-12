@@ -167,11 +167,8 @@ class EmailBot:
         if len(body) > 2000:
             body = body[:2000] + '...'
 
-        # Форматируем дату
-        date_str = email_info['date'].strftime("%d.%m.%Y %H:%M")
-
         message_text = (
-            f"🕒 <b>Дата:</b> {date_str}\n\n"
+            "Пропущенный звонок от клиента\n"
             f"{body}"
         )
 
