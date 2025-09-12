@@ -43,7 +43,11 @@ class EmailBot:
 
         @self.dp.message(Command("start"))
         async def start_command(message: Message):
-            """Команда /start"""
+            """Команда /start - только в личных сообщениях"""
+            # Проверяем, что это личное сообщение
+            if message.chat.type != 'private':
+                return
+
             await message.reply(
                 "👋 Привет! Я бот для мониторинга электронной почты.\n\n"
                 "🔍 Я автоматически отслеживаю новые письма и пересылаю их содержимое в настроенные группы.\n\n"
@@ -54,7 +58,11 @@ class EmailBot:
 
         @self.dp.message(Command("status"))
         async def status_command(message: Message):
-            """Команда /status"""
+            """Команда /status - только в личных сообщениях"""
+            # Проверяем, что это личное сообщение
+            if message.chat.type != 'private':
+                return
+
             uptime = datetime.now() - self.start_time
             uptime_str = str(uptime).split('.')[0]  # Убираем микросекунды
 
@@ -71,7 +79,11 @@ class EmailBot:
 
         @self.dp.message(Command("help"))
         async def help_command(message: Message):
-            """Команда /help"""
+            """Команда /help - только в личных сообщениях"""
+            # Проверяем, что это личное сообщение
+            if message.chat.type != 'private':
+                return
+
             help_text = (
                 "🤖 <b>Справка по боту</b>\n\n"
                 "Этот бот автоматически мониторит указанную электронную почту "
@@ -81,35 +93,88 @@ class EmailBot:
                 "• /status - информация о статусе бота\n"
                 "• /help - эта справка\n\n"
                 "⚙️ <b>Настройка:</b>\n"
-                "Бот настраивается через .env файл с переменными окружения."
+                "Бот настраивается через .env файл с переменными окружения.\n\n"
+                "ℹ️ <b>Примечание:</b>\n"
+                "Команды работают только в личных сообщениях с ботом."
             )
 
             await message.reply(help_text, parse_mode='HTML')
 
     def clean_email_body(self, body: str) -> str:
+        """Улучшенная очистка тела письма"""
         # Удалить CSS стили и HTML теги
         body = re.sub(r'<style.*?>.*?</style>', '', body, flags=re.DOTALL)
         body = re.sub(r'<[^>]+>', '', body)
-        # Оставить только строки с нужными данными
-        lines = body.splitlines()
-        filtered = []
-        for line in lines:
-            line = line.strip()
-            if line.startswith("Номер -") or line.startswith("ФИО -") or line.startswith("Время -"):
-                filtered.append(line)
-        return '\n'.join(filtered)
+
+        # Убираем текст "Отпишитесь" и все что после него
+        body = re.sub(r'Отпишитесь.*$', '', body, flags=re.DOTALL)
+
+        # Объединяем весь текст в одну строку, заменяя переносы строк пробелами
+        full_text = ' '.join(body.splitlines())
+
+        # Извлекаем данные с помощью регулярных выражений
+        result = []
+
+        # Ищем Номер
+        number_match = re.search(
+            r'Номер\s*-\s*([^\\]*?)(?=\s*\\\s*ФИО|$)', full_text, re.IGNORECASE)
+        if number_match:
+            number_value = number_match.group(1).strip()
+            result.append(f"Номер - {number_value}")
+
+        # Ищем ФИО
+        name_match = re.search(
+            r'ФИО\s*-\s*([^\\]*?)(?=\s*\\\s*Время|$)', full_text, re.IGNORECASE)
+        if name_match:
+            name_value = name_match.group(1).strip()
+            result.append(f"ФИО - {name_value}")
+
+        # Ищем Время
+        time_match = re.search(
+            r'Время\s*-\s*([^\\]*?)(?=\s*\\|$)', full_text, re.IGNORECASE)
+        if time_match:
+            time_value = time_match.group(1).strip()
+            # Убираем лишние символы и форматируем время
+            time_value = re.sub(r'\s+', ' ', time_value)
+            result.append(f"Время - {time_value}")
+
+        # Если не нашли через регулярки, попробуем альтернативный способ
+        if not result:
+            # Разбиваем по обратным слешам
+            parts = full_text.split('\\')
+
+            for part in parts:
+                part = part.strip()
+                if any(keyword in part.lower() for keyword in ['номер -', 'фио -', 'время -']):
+                    # Очищаем от лишних пробелов
+                    cleaned_part = re.sub(r'\s+', ' ', part).strip()
+                    if cleaned_part and len(cleaned_part) > 3:
+                        result.append(cleaned_part)
+
+        # Если все еще ничего не найдено, возвращаем исходный текст (очищенный)
+        if not result:
+            cleaned_body = re.sub(r'\s+', ' ', full_text).strip()
+            return cleaned_body[:500] if cleaned_body else "Не удалось извлечь данные из письма"
+
+        return '\n'.join(result)
 
     async def format_email_message(self, email_info: dict) -> str:
         """Форматирование письма для отправки в группу"""
         # Очищаем тело письма
-        body = self.clean_email_body(email_info['body'])[
-            :2000] + ('...' if len(email_info['body']) > 2000 else '')
+        body = self.clean_email_body(email_info['body'])
+
+        # Ограничиваем длину сообщения
+        if len(body) > 2000:
+            body = body[:2000] + '...'
+
         # Форматируем дату
         date_str = email_info['date'].strftime("%d.%m.%Y %H:%M")
+
         message_text = (
             f"🕒 <b>Дата:</b> {date_str}\n\n"
             f"{body}"
         )
+
         return message_text
 
     async def send_to_groups(self, message_text: str):
