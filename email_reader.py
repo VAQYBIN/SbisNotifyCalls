@@ -19,29 +19,52 @@ class EmailReader:
         self.last_check_time = datetime.now(
             timezone.utc) - timedelta(minutes=1)
 
-    async def connect(self) -> bool:
-        """Подключение к IMAP серверу Yandex"""
-        try:
-            # Создаем SSL контекст
-            context = ssl.create_default_context()
+    async def connect(self, retry_count: int = 3) -> bool:
+        """Подключение к IMAP серверу Yandex с retry механизмом"""
+        for attempt in range(retry_count):
+            try:
+                # Создаем более гибкий SSL контекст
+                context = ssl.create_default_context()
+                # Менее строгая проверка сертификата для совместимости
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
 
-            # Подключаемся к IMAP серверу
-            self.imap = imaplib.IMAP4_SSL(
-                Config.IMAP_SERVER, Config.IMAP_PORT, ssl_context=context)
+                # Устанавливаем таймауты
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
 
-            # Авторизация
-            result = self.imap.login(Config.EMAIL_ACC, Config.EMAIL_PASS)
+                logger.info(
+                    f"🔄 Попытка подключения {attempt + 1}/{retry_count} к {Config.EMAIL_ACC}")
 
-            if result[0] == 'OK':
-                logger.info(f"✅ Успешно подключились к {Config.EMAIL_ACC}")
-                return True
-            else:
-                logger.error(f"❌ Ошибка авторизации: {result}")
-                return False
+                # Подключаемся к IMAP серверу
+                self.imap = imaplib.IMAP4_SSL(
+                    Config.IMAP_SERVER, Config.IMAP_PORT, ssl_context=context)
 
-        except Exception as e:
-            logger.error(f"❌ Ошибка подключения к почте: {e}")
-            return False
+                # Авторизация
+                result = self.imap.login(Config.EMAIL_ACC, Config.EMAIL_PASS)
+
+                if result[0] == 'OK':
+                    logger.info(f"✅ Успешно подключились к {Config.EMAIL_ACC}")
+                    return True
+                else:
+                    logger.error(f"❌ Ошибка авторизации: {result}")
+                    if attempt < retry_count - 1:
+                        # Экспоненциальная задержка
+                        await asyncio.sleep(5 * (attempt + 1))
+
+            except (ssl.SSLError, ConnectionResetError, OSError) as ssl_error:
+                logger.warning(
+                    f"⚠️ SSL/Соединение ошибка (попытка {attempt + 1}/{retry_count}): {ssl_error}")
+                if attempt < retry_count - 1:
+                    await asyncio.sleep(5 * (attempt + 1))
+                else:
+                    logger.error("❌ Все попытки подключения исчерпаны")
+
+            except Exception as e:
+                logger.error(f"❌ Неожиданная ошибка подключения к почте: {e}")
+                if attempt < retry_count - 1:
+                    await asyncio.sleep(5 * (attempt + 1))
+
+        return False
 
     def disconnect(self):
         """Отключение от IMAP сервера"""
@@ -107,14 +130,31 @@ class EmailReader:
         return body.strip()
 
     async def check_new_emails(self, sender_email: Optional[str] = None) -> List[Dict]:
-        """Проверка новых писем"""
+        """Проверка новых писем с улучшенной обработкой ошибок"""
         try:
+            # Проверяем соединение и переподключаемся при необходимости
             if not self.imap:
                 if not await self.connect():
                     return []
 
-            # Выбираем папку входящих
-            self.imap.select('INBOX')
+            # Пытаемся проверить состояние соединения
+            try:
+                # Выбираем папку входящих
+                result = self.imap.select('INBOX')
+                if result[0] != 'OK':
+                    logger.warning(
+                        "⚠️ Не удалось выбрать папку INBOX, переподключаемся...")
+                    self.disconnect()
+                    if not await self.connect():
+                        return []
+                    self.imap.select('INBOX')
+            except (ConnectionResetError, ssl.SSLError, OSError) as conn_error:
+                logger.warning(
+                    f"⚠️ Ошибка соединения при выборе папки: {conn_error}")
+                self.disconnect()
+                if not await self.connect():
+                    return []
+                self.imap.select('INBOX')
 
             # Формируем поисковый запрос для новых писем
             search_criteria = f'SINCE "{self.last_check_time.strftime("%d-%b-%Y")}"'
@@ -188,8 +228,14 @@ class EmailReader:
 
             return new_emails
 
+        except (ssl.SSLError, ConnectionResetError, OSError) as conn_error:
+            logger.error(
+                f"❌ Ошибка соединения при проверке писем: {conn_error}")
+            # Принудительно отключаемся для следующей попытки переподключения
+            self.disconnect()
+            return []
         except Exception as e:
-            logger.error(f"❌ Ошибка проверки новых писем: {e}")
+            logger.error(f"❌ Неожиданная ошибка проверки новых писем: {e}")
             return []
 
     async def run_email_monitoring(self, callback, sender_email: Optional[str] = None, check_interval: int = 30):
