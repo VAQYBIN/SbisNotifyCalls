@@ -1,4 +1,5 @@
 import os
+import logging
 from dotenv import load_dotenv
 from typing import List, Optional
 
@@ -53,24 +54,24 @@ class Config:
         # Проверка уровня логирования
         valid_log_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         if cls.LOG_LEVEL not in valid_log_levels:
-            print(
+            logging.warning(
                 f"⚠️  Неверный LOG_LEVEL: {cls.LOG_LEVEL}, используется INFO")
             cls.LOG_LEVEL = 'INFO'
 
         # Проверка интервала мониторинга
         if cls.CHECK_INTERVAL < 10:
-            print(
+            logging.warning(
                 f"⚠️  Слишком маленький CHECK_INTERVAL: {cls.CHECK_INTERVAL}, используется 10 секунд")
             cls.CHECK_INTERVAL = 10
 
-        print("✅ Конфигурация загружена:")
-        print(f"📧 Email: {cls.EMAIL_ACC}")
-        print(f"📱 Групп для уведомлений: {len(cls.NOTIFIED_GROUPS)}")
-        print(f"📝 Уровень логирования: {cls.LOG_LEVEL}")
-        print(f"📁 Файл логов: {cls.LOG_FILE}")
-        print(f"⏱️  Интервал проверки: {cls.CHECK_INTERVAL} сек")
+        logging.info("✅ Конфигурация загружена:")
+        logging.info(f"📧 Email: {cls.EMAIL_ACC}")
+        logging.info(f"📱 Групп для уведомлений: {len(cls.NOTIFIED_GROUPS)}")
+        logging.info(f"📝 Уровень логирования: {cls.LOG_LEVEL}")
+        logging.info(f"📁 Файл логов: {cls.LOG_FILE}")
+        logging.info(f"⏱️  Интервал проверки: {cls.CHECK_INTERVAL} сек")
         if cls.FILTER_SENDER:
-            print(f"🔍 Фильтр отправителя: {cls.FILTER_SENDER}")
+            logging.info(f"🔍 Фильтр отправителя: {cls.FILTER_SENDER}")
 
 
 # Проверяем конфигурацию при импорте модуля

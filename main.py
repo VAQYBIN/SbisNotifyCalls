@@ -37,7 +37,7 @@ def setup_logging():
         file_handler.setLevel(log_level)
         handlers.append(file_handler)
     except Exception as e:
-        print(f"⚠️  Ошибка создания файлового логгера: {e}")
+        logging.error(f"⚠️  Ошибка создания файлового логгера: {e}")
 
     # Консольный обработчик (если включен)
     if Config.LOG_CONSOLE_OUTPUT:
