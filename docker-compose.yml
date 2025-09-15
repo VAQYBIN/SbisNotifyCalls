@@ -8,7 +8,7 @@ services:
   email-telegram-bot:
     # Указываем имя образа для GitHub Container Registry
     # Этот образ будет собираться и публиковаться в GitHub
-    image: ghcr.io/vaqybin/email-telegram-bot:latest
+    image: ghcr.io/vaqybin/sbisnotifycalls:latest
     
     # Имя контейнера (опционально, но удобно для отладки)
     container_name: email-telegram-bot
