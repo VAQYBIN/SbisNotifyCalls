@@ -1,0 +1,121 @@
+# =======================================================
+# GitHub Actions Workflow для Email to Telegram Bot
+# =======================================================
+# Этот файл определяет автоматический процесс сборки и публикации
+# Docker образа в GitHub Container Registry
+
+# Имя workflow - будет отображаться в GitHub Actions
+name: Build and Push Docker Image
+
+# Определяем когда запускать workflow
+on:
+  # Запускается при каждом push в main ветку
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  # Запускается при создании тегов (для версионирования)
+  # Например: git tag v1.0.0 && git push origin v1.0.0    
+  
+  # Опционально: позволяет запускать workflow вручную через GitHub UI
+  workflow_dispatch:
+
+# Определяем переменные окружения для всего workflow
+env:
+  # Название нашего образа в GitHub Container Registry
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+# Определяем задачи (jobs) которые будут выполняться
+jobs:
+  # =======================================================
+  # Job: Сборка и публикация Docker образа
+  # =======================================================
+  build-and-push:
+    # Запускаем на последней версии Ubuntu
+    runs-on: ubuntu-latest
+    
+    # Устанавливаем права доступа для GITHUB_TOKEN
+    # Это нужно для публикации в GitHub Container Registry
+    permissions:
+      contents: read        # Чтение кода репозитория
+      packages: write       # Запись в GitHub Packages (Container Registry)
+    
+    # Определяем шаги выполнения
+    steps:
+      # Шаг 1: Получаем исходный код репозитория
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        # Это действие загружает ваш код в виртуальную машину GitHub
+        # Аналогично выполнению "git clone" на сервере GitHub
+      
+      # Шаг 2: Авторизуемся в GitHub Container Registry
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          # GITHUB_TOKEN автоматически предоставляется GitHub Actions
+          # Нам не нужно создавать его самостоятельно
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Шаг 3: Извлекаем метаданные для тегирования образа
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Этот action автоматически создает правильные теги:
+          # - ghcr.io/username/repo:main для push в main
+          # - ghcr.io/username/repo:v1.0.0 для тега v1.0.0
+          # - ghcr.io/username/repo:latest для последней версии
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      # Шаг 4: Собираем и публикуем Docker образ
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          # Используем текущую директорию как контекст сборки
+          context: .
+          
+          # Публикуем образ (а не только собираем локально)
+          push: true
+          
+          # Используем теги, сгенерированные на предыдущем шаге
+          tags: ${{ steps.meta.outputs.tags }}
+          
+          # Добавляем метаданные (аннотации) к образу
+          # Это включает информацию о коммите, ветке, времени сборки
+          labels: ${{ steps.meta.outputs.labels }}
+
+# =======================================================
+# Дополнительные возможности (закомментированы)
+# =======================================================
+# Раскомментируйте следующие секции если нужны дополнительные функции:
+
+# Добавить Job для тестирования перед сборкой:
+# test:
+#   runs-on: ubuntu-latest
+#   steps:
+#     - uses: actions/checkout@v4
+#     - name: Set up Python
+#       uses: actions/setup-python@v5
+#       with:
+#         python-version: '3.11'
+#     - name: Install dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         pip install -r requirements.txt
+#     - name: Run basic tests
+#       run: |
+#         python -m py_compile main.py config.py email_reader.py
+
+# Добавить сборку для нескольких архитектур:
+# В секции build-and-push добавить:
+#   - name: Set up Docker Buildx
+#     uses: docker/setup-buildx-action@v3
+# 
+# В docker/build-push-action добавить:
+#   platforms: linux/amd64,linux/arm64
