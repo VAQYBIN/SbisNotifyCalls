@@ -1,33 +1,66 @@
-FROM python:3.11-slim
+# ================================================
+# STAGE 1: Build Environment (Dependencies)
+# ================================================
+# Используем official Python образ как базовый для сборки
+# Alpine версия меньше по размеру, но иногда могут быть проблемы с некоторыми пакетами
+# Поэтому используем slim-bookworm для лучшей совместимости
+FROM python:3.11-slim-bookworm AS builder
 
-LABEL maintainer="VAQYBIN"
-LABEL description="Email to Telegram Bot"
-
+# Устанавливаем рабочую директорию для этапа сборки
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
-    && rm -rf /var/lib/apt/lists/*
-
+# Копируем только requirements.txt сначала
+# Это важно для оптимизации Docker layer caching
+# Если зависимости не изменились, Docker переиспользует слой
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+# Создаем виртуальное окружение
+# Это изолирует наши зависимости и упрощает копирование в финальный образ
+RUN python -m venv /app/venv
 
-COPY . .
+# Активируем виртуальное окружение и устанавливаем зависимости
+# --no-cache-dir экономит место, не сохраняя кэш pip
+ENV PATH="/app/venv/bin:$PATH"
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN groupadd -r botuser && useradd -r -g botuser botuser
+# ================================================
+# STAGE 2: Runtime Environment (Final Image)
+# ================================================
+# Финальный образ будет намного меньше, так как не содержит build tools
+FROM python:3.11-slim-bookworm AS production
 
-RUN mkdir -p /app/logs && \
-    chown -R botuser:botuser /app
+# Создаем пользователя для безопасности
+# Никогда не запускайте приложения от root в продакшене
+RUN groupadd --gid 1000 botuser && \
+    useradd --uid 1000 --gid botuser --shell /bin/bash --create-home botuser
 
+# Устанавливаем рабочую директорию
+WORKDIR /app
+
+# Копируем виртуальное окружение из build stage
+COPY --from=builder /app/venv /app/venv
+
+# Копируем исходный код приложения
+# Порядок важен: сначала менее изменяемые файлы
+COPY config.py email_reader.py main.py ./
+
+# Устанавливаем правильные права доступа
+RUN chown -R botuser:botuser /app
+
+# Переключаемся на непривилегированного пользователя
 USER botuser
 
-EXPOSE 8080
+# Настраиваем переменные окружения
+ENV PATH="/app/venv/bin:$PATH" \
+    PYTHONPATH="/app" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
-ENV PYTHONUNBUFFERED=1
-ENV LOG_FILE=/app/logs/bot.log
-
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD python -c "import request; request.get('http://localhost:8080/health')" || exit 1
-
+# Определяем команду по умолчанию
+# Используем exec форму для правильной обработки сигналов
 CMD ["python", "main.py"]
+
+# Добавляем метаданные образа
+LABEL maintainer="VAQYBIN" \
+      description="Email to Telegram Bot" \
+      version="1.0"

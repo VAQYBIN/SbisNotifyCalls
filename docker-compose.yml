@@ -1,34 +1,105 @@
-version: '3.8'
+# =======================================================
+# Docker Compose для Email to Telegram Bot
+# =======================================================
 services:
-  email-bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: sbis-notify-calls
+  # ===============================================
+  # Основной сервис бота
+  # ===============================================
+  email-telegram-bot:
+    # Указываем имя образа для GitHub Container Registry
+    # Этот образ будет собираться и публиковаться в GitHub
+    image: ghcr.io/vaqybin/email-telegram-bot:latest
+    
+    # Имя контейнера (опционально, но удобно для отладки)
+    container_name: email-telegram-bot
+    
+    # Политика перезапуска
+    # unless-stopped: перезапускается всегда, кроме ручной остановки
+    # Идеально для долго работающих сервисов как ваш бот
     restart: unless-stopped
+    
+    # Переменные окружения из .env файла
+    # Docker Compose автоматически подключит .env файл из текущей директории
     env_file:
       - .env
-    environment:
-      - PYTHONUNBUFFERED=1
-      - LOG_FILE=/app/logs/bot.log
-      - TZ=Europe/Moscow
+    
+    # Монтируем том для логов
+    # Это позволит просматривать логи даже после пересоздания контейнера
     volumes:
-      - ./logs:/app/logs
+      - bot_logs:/app/logs
+    
+    # Настройки сети
+    # Хотя ваш бот не использует входящие соединения,
+    # указываем сеть для будущих расширений
     networks:
-      - bot-network
+      - bot_network
+    
+    # Настройки ресурсов (опционально)
+    # Ограничиваем использование ресурсов для стабильности
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    
+    # Проверка здоровья контейнера
+    # Полезно для мониторинга состояния бота
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "python"]
+      test: ["CMD-SHELL", "python -c 'import psutil; exit(0 if any(\"python\" in p.name() for p in psutil.process_iter()) else 1)'"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
-networks:
-  bot-network:
-    driver: bridge
-    driver_opts:
-      com.docker.network.bridge.name: br-email-bot
-
+# =======================================================
+# Настройки томов
+# =======================================================
+# Именованные тома сохраняются между перезапусками контейнеров
 volumes:
-  bot-logs:
+  bot_logs:
     driver: local
+    # Метки для удобства управления
+    # labels:
+    #   - "project=email-telegram-bot"
+    #   - "type=logs"
+
+# =======================================================
+# Настройки сетей
+# =======================================================
+# Создаем изолированную сеть для нашего приложения
+networks:
+  bot_network:
+    driver: bridge
+    # Настройки сети (опционально)
+    # ipam:
+    #   config:
+    #     - subnet: 172.20.0.0/16
+    # labels:
+    #   - "project=email-telegram-bot"
+
+# =======================================================
+# Дополнительные настройки для development
+# =======================================================
+# Раскомментируйте следующий блок для разработки:
+# 
+# profiles:
+#   - development
+# 
+# services:
+#   email-telegram-bot-dev:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#       target: production
+#     container_name: email-telegram-bot-dev
+#     restart: "no"
+#     env_file:
+#       - .env
+#     volumes:
+#       - .:/app:ro  # Монтируем исходный код только для чтения
+#       - bot_logs:/app/logs
+#     networks:
+#       - bot_network
