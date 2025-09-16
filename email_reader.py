@@ -19,6 +19,28 @@ class EmailReader:
         self.last_check_time = datetime.now(
             timezone.utc) - timedelta(minutes=1)
 
+    async def ensure_connection(self) -> bool:
+        """Проверка активного соединения с почтовым сервером."""
+        if not self.imap:
+            return await self.connect()
+
+        try:
+            status, _ = self.imap.noop()
+            if status != 'OK':
+                raise imaplib.IMAP4.error(f"NOOP returned status {status}")
+            return True
+        except (
+            imaplib.IMAP4.abort,
+            imaplib.IMAP4.error,
+            ssl.SSLError,
+            ConnectionResetError,
+            OSError,
+        ) as error:
+            logger.warning(
+                f"⚠️ Обнаружены проблемы с соединением (noop): {error}. Переподключаемся...")
+            self.disconnect()
+            return await self.connect()
+
     async def connect(self, retry_count: int = 3) -> bool:
         """Подключение к IMAP серверу Yandex с retry механизмом"""
         for attempt in range(retry_count):
@@ -51,7 +73,8 @@ class EmailReader:
                         # Экспоненциальная задержка
                         await asyncio.sleep(5 * (attempt + 1))
 
-            except (ssl.SSLError, ConnectionResetError, OSError) as ssl_error:
+            except (ssl.SSLError, ConnectionResetError, OSError,
+                    imaplib.IMAP4.abort, imaplib.IMAP4.error) as ssl_error:
                 logger.warning(
                     f"⚠️ SSL/Соединение ошибка (попытка {attempt + 1}/{retry_count}): {ssl_error}")
                 if attempt < retry_count - 1:
@@ -74,6 +97,8 @@ class EmailReader:
                 self.imap.logout()
                 self.imap = None
                 logger.info("✅ Отключились от почтового сервера")
+        except (imaplib.IMAP4.abort, imaplib.IMAP4.error) as e:
+            logger.warning(f"⚠️ Ошибка при отключении (игнорируем): {e}")
         except Exception as e:
             logger.error(f"❌ Ошибка при отключении: {e}")
 
@@ -133,9 +158,8 @@ class EmailReader:
         """Проверка новых писем с улучшенной обработкой ошибок"""
         try:
             # Проверяем соединение и переподключаемся при необходимости
-            if not self.imap:
-                if not await self.connect():
-                    return []
+            if not await self.ensure_connection():
+                return []
 
             # Пытаемся проверить состояние соединения
             try:
@@ -148,7 +172,8 @@ class EmailReader:
                     if not await self.connect():
                         return []
                     self.imap.select('INBOX')
-            except (ConnectionResetError, ssl.SSLError, OSError) as conn_error:
+            except (ConnectionResetError, ssl.SSLError, OSError,
+                    imaplib.IMAP4.abort, imaplib.IMAP4.error) as conn_error:
                 logger.warning(
                     f"⚠️ Ошибка соединения при выборе папки: {conn_error}")
                 self.disconnect()
@@ -228,7 +253,8 @@ class EmailReader:
 
             return new_emails
 
-        except (ssl.SSLError, ConnectionResetError, OSError) as conn_error:
+        except (ssl.SSLError, ConnectionResetError, OSError,
+                imaplib.IMAP4.abort, imaplib.IMAP4.error) as conn_error:
             logger.error(
                 f"❌ Ошибка соединения при проверке писем: {conn_error}")
             # Принудительно отключаемся для следующей попытки переподключения
